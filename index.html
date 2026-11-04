@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Modo Examen UA</title>
+<style>
+:root{font-family:system-ui,Arial,sans-serif;color:#fff}*{box-sizing:border-box}body{margin:0;min-height:100dvh;background:#176a38;transition:background .2s}body.alerta{background:#b91c1c}body.final{background:#243347}.wrap{max-width:600px;margin:auto;padding:24px;min-height:100dvh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:16px}h1{font-size:clamp(1.5rem,6vw,2.3rem);margin:0}#timer{font-variant-numeric:tabular-nums;font-size:clamp(4rem,18vw,7rem);font-weight:750;letter-spacing:-.04em}#status{font-weight:700;font-size:1.25rem}button,input{font:inherit;border-radius:12px;padding:12px;border:0}button{background:#fff;color:#173d27;font-weight:700;cursor:pointer}button:disabled{opacity:.55;cursor:default}input{width:min(100%,340px);color:#17212b}#setup,#details{width:100%}#details{background:#0002;border-radius:12px;padding:12px;font-size:.9rem}#events{max-height:140px;overflow:auto;text-align:left;word-break:break-word}small{opacity:.9}#start,#download{margin-top:10px}.hidden{display:none!important}
+</style></head>
+<body><main class="wrap">
+<h1>Modo Examen UA</h1><div id="setup"><p>Introduce tu identificador de examen (no datos personales).</p><input id="student" maxlength="40" placeholder="Ej.: Equipo 12" autocomplete="off"><p><small>La página detecta interrupciones de visibilidad, no las páginas que visitas. La supervisión debe ser informada y autorizada.</small></p><button id="start">Iniciar 75 minutos</button></div>
+<div id="timer" aria-live="off">75:00</div><div id="status">Listo para comenzar</div>
+<div id="details" class="hidden"><div>Interrupciones detectadas: <strong id="count">0</strong></div><div>Tiempo acumulado fuera de pantalla: <strong id="away">0 s</strong></div><div id="events"></div><button id="download">Exportar registro CSV</button></div>
+<small id="hint">Mantén la pantalla visible. Evita bloquear el teléfono.</small>
+</main><script>
+'use strict';
+const duration=75*60*1000;
+const $=id=>document.getElementById(id);
+let started=false,ended=false,endAt=0,awaySince=null,events=[],student='',audioCtx=null;
+function timeStamp(t){return new Date(t).toLocaleString('es-CL',{hour12:false});}
+function format(ms){let s=Math.max(0,Math.ceil(ms/1000));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
+function beep(){try{audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();let osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type='square';osc.frequency.value=880;gain.gain.value=.08;osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+.65);}catch(e){}}
+function record(type,when=Date.now(),detail=''){events.push({type,when,detail});$('count').textContent=String(events.filter(e=>e.type==='Salida de pantalla').length);renderEvents();}
+function renderEvents(){const list=$('events');list.replaceChildren();for(const e of events.slice(-7)){let p=document.createElement('p');p.textContent=`${timeStamp(e.when)} · ${e.type}${e.detail?' · '+e.detail:''}`;list.appendChild(p);}}
+function totalAway(now=Date.now()){let sum=0,last=null;for(const e of events){if(e.type==='Salida de pantalla')last=e.when;if(e.type==='Regreso a pantalla'&&last!==null){sum+=e.when-last;last=null;}}if(last!==null)sum+=now-last;return sum;}
+function update(){if(!started)return;const now=Date.now();$('timer').textContent=format(endAt-now);$('away').textContent=Math.floor(totalAway(now)/1000)+' s';if(now>=endAt&&!ended){ended=true;record('Tiempo finalizado');document.body.className='final';$('status').textContent='Tiempo finalizado';$('hint').textContent='Entrega el examen siguiendo las indicaciones del docente.';return;}if(ended)return;if(document.hidden||awaySince!==null){document.body.className='alerta';$('status').textContent='Interrupción detectada';}else{document.body.className='';$('status').textContent='Pantalla de supervisión activa';}}
+function leave(){if(!started||ended||awaySince!==null)return;awaySince=Date.now();record('Salida de pantalla',awaySince);update();}
+function returnToPage(){if(!started||ended||awaySince===null)return;const now=Date.now();record('Regreso a pantalla',now,Math.round((now-awaySince)/1000)+' s');awaySince=null;document.body.className='alerta';$('status').textContent='ALERTA: se ha interrumpido la pantalla';beep();setTimeout(()=>{if(started&&!ended&&!document.hidden){document.body.className='';$('status').textContent='Pantalla activa · interrupción registrada';}},3500);update();}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else returnToPage();});
+window.addEventListener('pagehide',leave);window.addEventListener('pageshow',()=>{if(!document.hidden)returnToPage();});
+$('start').addEventListener('click',()=>{if(started)return;student=$('student').value.trim()||'Sin identificador';started=true;endAt=Date.now()+duration;$('setup').classList.add('hidden');$('details').classList.remove('hidden');record('Inicio');try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();}catch(e){}update();setInterval(update,500);});
+$('download').addEventListener('click',()=>{const esc=s=>'"'+String(s).replaceAll('"','""')+'"';const rows=[['Identificador','Evento','Fecha y hora','Detalle'],...events.map(e=>[student,e.type,new Date(e.when).toISOString(),e.detail])];const csv='\ufeff'+rows.map(r=>r.map(esc).join(';')).join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download='registro_examen_'+student.replace(/[^a-z0-9_-]/gi,'_')+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
+</script></body></html>
