@@ -1,32 +1,167 @@
 <!doctype html>
 <html lang="es">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Modo Examen UA</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#39ff14">
+<title>Modo Examen UA · Temporizador</title>
 <style>
-:root{font-family:system-ui,Arial,sans-serif;color:#fff}*{box-sizing:border-box}body{margin:0;min-height:100dvh;background:#176a38;transition:background .2s}body.alerta{background:#b91c1c}body.final{background:#243347}.wrap{max-width:600px;margin:auto;padding:24px;min-height:100dvh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:16px}h1{font-size:clamp(1.5rem,6vw,2.3rem);margin:0}#timer{font-variant-numeric:tabular-nums;font-size:clamp(4rem,18vw,7rem);font-weight:750;letter-spacing:-.04em}#status{font-weight:700;font-size:1.25rem}button,input{font:inherit;border-radius:12px;padding:12px;border:0}button{background:#fff;color:#173d27;font-weight:700;cursor:pointer}button:disabled{opacity:.55;cursor:default}input{width:min(100%,340px);color:#17212b}#setup,#details{width:100%}#details{background:#0002;border-radius:12px;padding:12px;font-size:.9rem}#events{max-height:140px;overflow:auto;text-align:left;word-break:break-word}small{opacity:.9}#start,#download{margin-top:10px}.hidden{display:none!important}
-</style></head>
-<body><main class="wrap">
-<h1>Modo Examen UA</h1><div id="setup"><p>Introduce tu identificador de examen (no datos personales).</p><input id="student" maxlength="40" placeholder="Ej.: Equipo 12" autocomplete="off"><p><small>La página detecta interrupciones de visibilidad, no las páginas que visitas. La supervisión debe ser informada y autorizada.</small></p><button id="start">Iniciar 75 minutos</button></div>
-<div id="timer" aria-live="off">75:00</div><div id="status">Listo para comenzar</div>
-<div id="details" class="hidden"><div>Interrupciones detectadas: <strong id="count">0</strong></div><div>Tiempo acumulado fuera de pantalla: <strong id="away">0 s</strong></div><div id="events"></div><button id="download">Exportar registro CSV</button></div>
-<small id="hint">Mantén la pantalla visible. Evita bloquear el teléfono.</small>
-</main><script>
-'use strict';
-const duration=75*60*1000;
-const $=id=>document.getElementById(id);
-let started=false,ended=false,endAt=0,awaySince=null,events=[],student='',audioCtx=null;
-function timeStamp(t){return new Date(t).toLocaleString('es-CL',{hour12:false});}
-function format(ms){let s=Math.max(0,Math.ceil(ms/1000));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
-function beep(){try{audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();let osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type='square';osc.frequency.value=880;gain.gain.value=.08;osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+.65);}catch(e){}}
-function record(type,when=Date.now(),detail=''){events.push({type,when,detail});$('count').textContent=String(events.filter(e=>e.type==='Salida de pantalla').length);renderEvents();}
-function renderEvents(){const list=$('events');list.replaceChildren();for(const e of events.slice(-7)){let p=document.createElement('p');p.textContent=`${timeStamp(e.when)} · ${e.type}${e.detail?' · '+e.detail:''}`;list.appendChild(p);}}
-function totalAway(now=Date.now()){let sum=0,last=null;for(const e of events){if(e.type==='Salida de pantalla')last=e.when;if(e.type==='Regreso a pantalla'&&last!==null){sum+=e.when-last;last=null;}}if(last!==null)sum+=now-last;return sum;}
-function update(){if(!started)return;const now=Date.now();$('timer').textContent=format(endAt-now);$('away').textContent=Math.floor(totalAway(now)/1000)+' s';if(now>=endAt&&!ended){ended=true;record('Tiempo finalizado');document.body.className='final';$('status').textContent='Tiempo finalizado';$('hint').textContent='Entrega el examen siguiendo las indicaciones del docente.';return;}if(ended)return;if(document.hidden||awaySince!==null){document.body.className='alerta';$('status').textContent='Interrupción detectada';}else{document.body.className='';$('status').textContent='Pantalla de supervisión activa';}}
-function leave(){if(!started||ended||awaySince!==null)return;awaySince=Date.now();record('Salida de pantalla',awaySince);update();}
-function returnToPage(){if(!started||ended||awaySince===null)return;const now=Date.now();record('Regreso a pantalla',now,Math.round((now-awaySince)/1000)+' s');awaySince=null;document.body.className='alerta';$('status').textContent='ALERTA: se ha interrumpido la pantalla';beep();setTimeout(()=>{if(started&&!ended&&!document.hidden){document.body.className='';$('status').textContent='Pantalla activa · interrupción registrada';}},3500);update();}
-document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else returnToPage();});
-window.addEventListener('pagehide',leave);window.addEventListener('pageshow',()=>{if(!document.hidden)returnToPage();});
-$('start').addEventListener('click',()=>{if(started)return;student=$('student').value.trim()||'Sin identificador';started=true;endAt=Date.now()+duration;$('setup').classList.add('hidden');$('details').classList.remove('hidden');record('Inicio');try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();}catch(e){}update();setInterval(update,500);});
-$('download').addEventListener('click',()=>{const esc=s=>'"'+String(s).replaceAll('"','""')+'"';const rows=[['Identificador','Evento','Fecha y hora','Detalle'],...events.map(e=>[student,e.type,new Date(e.when).toISOString(),e.detail])];const csv='\ufeff'+rows.map(r=>r.map(esc).join(';')).join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download='registro_examen_'+student.replace(/[^a-z0-9_-]/gi,'_')+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
-</script></body></html>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#102410}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;background:#39ff14;transition:background .2s}
+body.alert{background:#ff9817}
+body.finished{background:#cbd5e1}
+main{min-height:100dvh;max-width:780px;margin:auto;padding:24px 18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center}
+h1{margin:0;font-size:clamp(1.5rem,5vw,2.2rem)}
+#clock{font-size:clamp(4.8rem,18vw,9rem);font-weight:850;letter-spacing:-.07em;font-variant-numeric:tabular-nums;line-height:1}
+#status{font-size:clamp(1.2rem,4vw,1.7rem);font-weight:800}
+button{font:inherit;border:0;border-radius:14px;padding:14px 20px;font-weight:750;cursor:pointer;background:#122612;color:white;min-height:50px}
+button.secondary{background:#ffffffbd;color:#122612;border:1px solid #263526}
+button:disabled{opacity:.45;cursor:default}
+#actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+#history{width:min(100%,680px);background:#ffffffb8;border-radius:14px;padding:14px;text-align:left}
+#history h2{margin:0 0 8px;font-size:1rem}
+#events{max-height:190px;overflow:auto;padding-left:23px;margin:0;font-size:.9rem}
+#events li{padding:4px 0;border-bottom:1px solid #0002}
+#help{max-width:660px;font-size:.85rem;line-height:1.4}
+#warning{font-size:1.1rem;font-weight:800}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>🟢 MODO EXAMEN UA</h1>
+<div id="clock" role="timer" aria-live="off">75:00</div>
+<div id="status" role="status">Listo para iniciar</div>
+<div id="warning" hidden>⚠️ Interrupción detectada. Alarma activada.</div>
+<div id="actions">
+<button id="start">▶ Iniciar examen</button>
+<button id="ack" hidden>Reconocer alerta y volver al verde</button>
+<button id="fullscreen" class="secondary" hidden>⛶ Pantalla completa</button>
+<button id="stop" class="secondary" hidden>Finalizar antes de tiempo</button>
+</div>
+<section id="history">
+<h2>Historial de movimientos (<span id="count">0</span>)</h2>
+<ol id="events"><li>Sin incidencias.</li></ol>
+</section>
+<p id="help">Pulsa Iniciar para activar el contador, solicitar pantalla completa y habilitar el sonido. Mantén el teléfono visible. La detección de cambios de aplicación depende del navegador; el sonido continuo solo puede funcionar mientras esta página permanezca activa.</p>
+</main>
+<script>
+(() => {
+ const $ = id => document.getElementById(id);
+ const DURATION = 75*60*1000;
+ let started=false, finished=false, deadline=0, lastHidden=null, alerting=false;
+ let log=[], audio=null, oscillators=[], wakeLock=null, ticker=null, suppressFullscreen=false;
+ const fmt = ms => {
+   const seconds=Math.max(0,Math.ceil(ms/1000));
+   return `${String(Math.floor(seconds/60)).padStart(2,"0")}:${String(seconds%60).padStart(2,"0")}`;
+ };
+ const stamp = () => new Date().toLocaleTimeString("es-CL",{hour12:false});
+ function event(message) {
+   log.push(`${stamp()} · ${message}`);
+   $("count").textContent=log.length;
+   $("events").replaceChildren(...log.map(line => {let li=document.createElement("li");li.textContent=line;return li;}));
+ }
+ function soundOn() {
+   if (!started || finished || document.hidden) return;
+   try {
+     audio ??= new (window.AudioContext||window.webkitAudioContext)();
+     if(audio.state==="suspended") audio.resume().catch(()=>{});
+     if(oscillators.length) return;
+     for(const frequency of [740,925]){
+       const osc=audio.createOscillator(), gain=audio.createGain();
+       osc.type="square"; osc.frequency.value=frequency;gain.gain.value=.075;
+       osc.connect(gain);gain.connect(audio.destination);osc.start();
+       oscillators.push({osc,gain});
+     }
+   } catch(e) {event("No se pudo activar el sonido en este navegador");}
+ }
+ function soundOff(){
+   for(const {osc} of oscillators){try{osc.stop();osc.disconnect();}catch(e){}}
+   oscillators=[];
+ }
+ function setAlert(reason){
+   if(!started||finished)return;
+   if(!alerting){alerting=true;event(reason);}
+   else event(reason);
+   document.body.classList.add("alert");
+   $("status").textContent="ALERTA DE SUPERVISIÓN";
+   $("warning").hidden=false;
+   $("ack").hidden=false;
+   soundOn();
+   if(navigator.vibrate&&!document.hidden)navigator.vibrate([400,150,400,150,400]);
+ }
+ function update(){
+   if(!started||finished)return;
+   const remaining=deadline-Date.now();
+   $("clock").textContent=fmt(remaining);
+   if(remaining<=0) finish(false);
+ }
+ async function requestWake(){
+   try {if("wakeLock" in navigator && !document.hidden)wakeLock=await navigator.wakeLock.request("screen");}catch(e){}
+ }
+ async function requestFullscreen(){
+   try{
+     if(!document.fullscreenElement && document.documentElement.requestFullscreen)
+       await document.documentElement.requestFullscreen();
+   }catch(e){event("Pantalla completa no disponible; usa la opción del navegador");}
+ }
+ function finish(early){
+   if(finished)return;
+   finished=true;started=false;alerting=false;
+   clearInterval(ticker);soundOff();
+   document.body.classList.remove("alert");
+   document.body.classList.add("finished");
+   $("status").textContent=early?"Examen finalizado manualmente":"Tiempo terminado";
+   $("warning").hidden=true;$("ack").hidden=true;$("stop").hidden=true;
+   $("fullscreen").hidden=true;$("clock").textContent=early?$("clock").textContent:"00:00";
+   event(early?"Finalización manual":"Finalización de los 75 minutos");
+   try{wakeLock?.release();}catch(e){}
+ }
+ $("start").addEventListener("click",async()=>{
+   if(started||finished)return;
+   // Desbloquea el audio mediante una interacción real.
+   try{audio=new (window.AudioContext||window.webkitAudioContext)();await audio.resume();}catch(e){}
+   started=true;deadline=Date.now()+DURATION;
+   $("start").hidden=true;$("stop").hidden=false;$("fullscreen").hidden=false;
+   $("status").textContent="Pantalla activa · examen en curso";
+   event("Inicio del examen");
+   ticker=setInterval(update,250);update();
+   requestFullscreen();requestWake();
+ });
+ $("ack").addEventListener("click",()=>{
+   if(!alerting)return;
+   alerting=false;soundOff();document.body.classList.remove("alert");
+   $("status").textContent="Pantalla activa · examen en curso";
+   $("warning").hidden=true;$("ack").hidden=true;
+   event("Alerta reconocida");
+   requestWake();
+ });
+ $("fullscreen").addEventListener("click",requestFullscreen);
+ $("stop").addEventListener("click",()=>{if(confirm("¿Finalizar el examen antes de los 75 minutos?"))finish(true);});
+ document.addEventListener("visibilitychange",()=>{
+   if(!started||finished)return;
+   if(document.hidden){
+     lastHidden=Date.now();
+     event("Página oculta o cambio de aplicación");
+     soundOff();
+   }else{
+     if(lastHidden!==null){
+       const seconds=Math.round((Date.now()-lastHidden)/1000);
+       lastHidden=null;
+       setAlert(`Regreso a la página tras ${seconds} s fuera`);
+     }
+     requestWake();update();
+   }
+ });
+ window.addEventListener("blur",()=>{if(started&&!finished&&!document.hidden)event("La ventana perdió el foco (posible cambio)");});
+ document.addEventListener("fullscreenchange",()=>{
+   if(started&&!finished&&!document.fullscreenElement&&!document.hidden){
+     setAlert("Se salió del modo pantalla completa");
+   }
+ });
+ window.addEventListener("pagehide",()=>{if(started&&!finished){soundOff();}});
+})();
+</script>
+</body>
+</html>
